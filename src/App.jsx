@@ -3,12 +3,15 @@ import { configured, rpc, loadToken, saveToken } from "./api.js";
 import JoinLogin from "./screens/JoinLogin.jsx";
 import Picks from "./screens/Picks.jsx";
 import Leaderboard from "./screens/Leaderboard.jsx";
+import Admin from "./screens/Admin.jsx";
 
 export default function App() {
   const [token, setToken] = useState(loadToken);
   const [me, setMe] = useState(null);
   const [checking, setChecking] = useState(Boolean(token));
   const [tab, setTab] = useState("picks");
+  const [weeks, setWeeks] = useState(null);
+  const [week, setWeek] = useState(null);
 
   // On open, make sure the saved token still works.
   useEffect(() => {
@@ -18,6 +21,17 @@ export default function App() {
       .catch(() => signOut(false))
       .finally(() => setChecking(false));
   }, [token]);
+
+  // Once logged in, load the list of weeks and start on the current one.
+  useEffect(() => {
+    if (!me) return;
+    Promise.all([rpc("get_weeks"), rpc("get_current_week")])
+      .then(([all, current]) => {
+        setWeeks(all);
+        setWeek(current || all[all.length - 1] || null);
+      })
+      .catch(() => setWeeks([]));
+  }, [me]);
 
   function signIn(result) {
     saveToken(result.token);
@@ -37,6 +51,8 @@ export default function App() {
     saveToken(null);
     setToken(null);
     setMe(null);
+    setWeeks(null);
+    setWeek(null);
     setChecking(false);
   }
 
@@ -55,6 +71,13 @@ export default function App() {
   if (checking) return <main className="page muted">Loading…</main>;
   if (!me) return <JoinLogin onSignedIn={signIn} />;
 
+  const tabs = [
+    ["picks", "Picks"],
+    ["board", "Leaderboard"],
+    ...(me.is_admin ? [["admin", "Admin"]] : []),
+  ];
+  const shared = { token, me, weeks: weeks || [], week, setWeek, onAuthError: () => signOut(false) };
+
   return (
     <>
       <header className="topbar">
@@ -71,17 +94,25 @@ export default function App() {
       </header>
 
       <main className="page">
-        {tab === "picks" && <Picks token={token} onAuthError={() => signOut(false)} />}
-        {tab === "board" && <Leaderboard token={token} me={me} />}
+        {!weeks ? (
+          <p className="muted">Loading…</p>
+        ) : !week && tab !== "admin" ? (
+          <p className="muted">No games loaded yet. The schedule sync hasn't run.</p>
+        ) : (
+          <>
+            {tab === "picks" && <Picks {...shared} />}
+            {tab === "board" && <Leaderboard {...shared} />}
+            {tab === "admin" && <Admin {...shared} />}
+          </>
+        )}
       </main>
 
       <nav className="tabs">
-        <button className={tab === "picks" ? "active" : ""} onClick={() => setTab("picks")}>
-          This Week's Picks
-        </button>
-        <button className={tab === "board" ? "active" : ""} onClick={() => setTab("board")}>
-          Leaderboard
-        </button>
+        {tabs.map(([key, label]) => (
+          <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>
+            {label}
+          </button>
+        ))}
       </nav>
     </>
   );

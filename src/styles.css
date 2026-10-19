@@ -113,3 +113,45 @@ button, input { font: inherit; color: inherit; }
 .board th { font-size: 0.8rem; color: var(--muted); font-weight: 600; }
 .board .num { text-align: right; }
 .board tr.mine td { background: var(--brand-soft); font-weight: 700; }
+
+/* Week picker */
+.week-picker { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 8px; }
+.week-picker h2 { margin: 0; font-size: 1.3rem; }
+.week-picker button {
+  width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line);
+  background: var(--card); font-size: 1.5rem; line-height: 1; cursor: pointer; color: var(--brand);
+}
+.week-picker button:disabled { opacity: 0.3; cursor: default; }
+.center { text-align: center; }
+.ok { color: var(--win); margin: 8px 0; }
+
+/* Everyone's picks after kickoff */
+.league-picks { margin-top: 10px; font-size: 0.9rem; }
+.league-picks summary { cursor: pointer; color: var(--muted); }
+.league-picks p { margin: 6px 0 0; }
+
+/* Admin */
+.card h3 { margin: 0 0 8px; }
+.admin-row { border-top: 1px solid var(--line); padding: 12px 0; }
+.admin-row:first-of-type { border-top: none; }
+.admin-row-main { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.admin-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.badge {
+  display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 6px;
+  font-size: 0.7rem; background: var(--brand-soft); color: var(--brand); vertical-align: middle;
+}
+.badge.warn { background: none; border: 1px solid var(--miss); color: var(--miss); }
+.small-btn {
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); font-size: 0.85rem; font-weight: 600; cursor: pointer;
+}
+.small-btn.danger { color: var(--error); }
+.small-btn:disabled { opacity: 0.5; }
+.inline-form { display: flex; gap: 6px; margin-top: 8px; }
+.inline-form input, .score-edit input {
+  padding: 8px; font-size: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+}
+.inline-form input { flex: 1; min-width: 0; }
+.score-edit { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.score-edit label { display: flex; flex-direction: column; font-weight: 700; font-size: 0.85rem; }
+.score-edit input { width: 64px; margin-top: 4px; }

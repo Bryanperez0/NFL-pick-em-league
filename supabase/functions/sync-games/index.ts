@@ -4,9 +4,11 @@
 // feed and saves them into the "games" table.
 //
 // Call it with a POST request. The body is optional JSON:
-//   {}                                         -> whatever week ESPN says is current
-//   {"season": 2026, "season_type": 2, "week": 7}  -> a specific week
-// season_type: 1 = preseason, 2 = regular season, 3 = postseason
+//   {}                                            -> ESPN's current week + next week
+//                                                    (this is what the 15-minute schedule sends)
+//   {"season": 2026, "season_type": 2, "week": 7} -> one specific week
+//   {"season": 2026, "all_weeks": true}           -> the whole regular season (weeks 1-18)
+// season_type: 2 = regular season, 3 = playoffs. Preseason games are ignored.
 //
 // It must be called with the header  x-sync-secret: <your SYNC_SECRET>
 // so random people can't trigger it.
@@ -44,6 +46,12 @@ export function parseScoreboard(data: any): Game[] {
     const away = comp?.competitors?.find((c: any) => c.homeAway === "away");
     if (!home || !away) continue;
 
+    // Skip preseason, the Pro Bowl (AFC vs NFC), and playoff games whose teams aren't set yet.
+    const seasonType = Number(event.season?.type ?? data.season?.type);
+    const abbrs = [home.team?.abbreviation, away.team?.abbreviation];
+    if (seasonType !== 2 && seasonType !== 3) continue;
+    if (abbrs.some((a) => !a || ["AFC", "NFC", "TBD"].includes(a))) continue;
+
     const type = event.status?.type ?? comp.status?.type ?? {};
     let status: Game["status"];
     if (type.name === "STATUS_POSTPONED") status = "postponed";
@@ -65,7 +73,7 @@ export function parseScoreboard(data: any): Game[] {
     games.push({
       id: String(event.id),
       season: Number(event.season?.year ?? data.season?.year),
-      season_type: Number(event.season?.type ?? data.season?.type),
+      season_type: seasonType,
       week: Number(event.week?.number ?? data.week?.number),
       kickoff_at: new Date(event.date).toISOString(), // always UTC
       home_team: home.team.displayName,
@@ -81,6 +89,16 @@ export function parseScoreboard(data: any): Game[] {
   return games;
 }
 
+// The week after a given one: regular season weeks 1-18, then playoff
+// weeks 1-5 (4 is the Pro Bowl break, 5 is the Super Bowl).
+export function nextWeek(season: number, type: number, week: number): [number, number, number] | null {
+  if (!season || !week) return null;
+  if (type === 2) return week < 18 ? [season, 2, week + 1] : [season, 3, 1];
+  if (type === 3) return week < 5 ? [season, 3, week + 1] : null;
+  if (type === 1) return [season, 2, 1]; // late preseason -> Week 1
+  return null;
+}
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -94,25 +112,45 @@ Deno.serve(async (req) => {
     return json({ error: "Not allowed" }, 401);
   }
 
-  let body: { season?: number; season_type?: number; week?: number } = {};
+  let body: { season?: number; season_type?: number; week?: number; all_weeks?: boolean } = {};
   try {
     body = await req.json();
   } catch {
     // no body is fine
   }
 
-  const url = new URL(ESPN_URL);
-  if (body.week) {
-    url.searchParams.set("dates", String(body.season ?? new Date().getUTCFullYear()));
-    url.searchParams.set("seasontype", String(body.season_type ?? 2));
-    url.searchParams.set("week", String(body.week));
+  // Work out which weeks to fetch.
+  const games: Game[] = [];
+  const sources: string[] = [];
+  async function fetchWeek(season?: number, seasonType?: number, week?: number) {
+    const url = new URL(ESPN_URL);
+    if (week) {
+      url.searchParams.set("dates", String(season ?? new Date().getUTCFullYear()));
+      url.searchParams.set("seasontype", String(seasonType ?? 2));
+      url.searchParams.set("week", String(week));
+    }
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`ESPN returned ${res.status} for ${url}`);
+    const data = await res.json();
+    games.push(...parseScoreboard(data));
+    sources.push(url.toString());
+    return data;
   }
 
-  const espn = await fetch(url);
-  if (!espn.ok) {
-    return json({ error: `ESPN returned ${espn.status}` }, 502);
+  try {
+    if (body.all_weeks) {
+      for (let w = 1; w <= 18; w++) await fetchWeek(body.season, 2, w);
+    } else if (body.week) {
+      await fetchWeek(body.season, body.season_type, body.week);
+    } else {
+      // Current week, then next week so players can pick ahead.
+      const cur = await fetchWeek();
+      const next = nextWeek(Number(cur.season?.year), Number(cur.season?.type), Number(cur.week?.number));
+      if (next) await fetchWeek(...next);
+    }
+  } catch (err) {
+    return json({ error: String(err) }, 502);
   }
-  const games = parseScoreboard(await espn.json());
 
   // Save through the upsert_games database function using the service-role key.
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -121,11 +159,12 @@ Deno.serve(async (req) => {
   const save = await fetch(`${Deno.env.get("SUPABASE_URL")}/rest/v1/rpc/upsert_games`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ p_games: games }),
+    // Drop duplicates (the same game can't be saved twice in one batch).
+    body: JSON.stringify({ p_games: [...new Map(games.map((g) => [g.id, g])).values()] }),
   });
   if (!save.ok) {
     return json({ error: "Saving to database failed", detail: await save.text() }, 500);
   }
 
-  return json({ saved: games.length, source: url.toString() });
+  return json({ saved: games.length, sources });
 });
